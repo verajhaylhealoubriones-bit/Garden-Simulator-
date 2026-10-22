@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Farm Frenzy - Python Garden Simulator</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.1/full/pyodide.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+body{font-family:'Fredoka',sans-serif;color:#4a2a0a;background:linear-gradient(#8fd3f4 0,#cdeefb 160px,#7ccf5a 160px,#5fb446 100%) fixed}
+.code-font{font-family:'JetBrains Mono',monospace}
+.wood{background:linear-gradient(#d9a15b,#c48844);border:3px solid #7a4a1c;box-shadow:0 4px 0 #5b3512;border-radius:18px}
+.wood h2,.wood h3{color:#fff3d6;text-shadow:0 2px 0 #7a4a1c}
+.btn{background:linear-gradient(#ffd54a,#f5a623);border:2px solid #9a5a0c;box-shadow:0 3px 0 #9a5a0c;border-radius:12px;font-weight:700;padding:.4rem .8rem;color:#4a2a0a}
+.btn:active{transform:translateY(2px);box-shadow:0 1px 0 #9a5a0c}
+.btn.green{background:linear-gradient(#9be564,#5fb446);border-color:#2f7a1c;box-shadow:0 3px 0 #2f7a1c;color:#10300a}
+.btn.blue{background:linear-gradient(#8fd3f4,#4aa8e0);border-color:#1f6a9a;box-shadow:0 3px 0 #1f6a9a;color:#0a2a40}
+.btn.sel{outline:3px solid #fff}
+.paper{background:#fff3d6;border:2px solid #7a4a1c;border-radius:12px}
+.soil{background:#8b5a2b;border:2px solid #5b3512;border-radius:12px;aspect-ratio:1;font-size:1.8rem;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.soil:hover{filter:brightness(1.15)}
+.ripe{background:#a56a30;box-shadow:0 0 0 3px #ffd54a}
+.pen{background:#e9c68a;border:3px dashed #7a4a1c;border-radius:14px;height:80px;font-size:2.3rem;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.hop{animation:hop .8s ease-in-out infinite}
+@keyframes hop{50%{transform:translateY(-8px)}}
+@media (prefers-reduced-motion:reduce){.hop,.animate-bounce{animation:none}}
+</style>
+</head>
+<body class="min-h-screen p-3">
+<header class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 mb-3">
+  <div>
+    <div class="flex items-center gap-2">
+      <h1 class="text-3xl font-bold text-white" style="text-shadow:0 3px 0 #2b7fb0">🐔 Python Garden Simulator</h1>
+      <span id="version-badge" class="text-xs font-bold bg-white/80 border-2 border-[#7a4a1c] px-2 py-0.5 rounded-full"></span>
+    </div>
+    <p class="text-sm font-medium text-[#1f5f84]">SDG 2, 13, 15 &middot; every click runs your Python</p>
+  </div>
+  <div class="flex gap-2">
+    <div class="wood px-4 py-1 text-center"><div class="text-xs text-[#fff3d6]">Day</div><div class="text-xl font-bold text-white" id="day-counter">1</div></div>
+    <div class="wood px-4 py-1 text-center"><div class="text-xs text-[#fff3d6]">Score</div><div class="text-xl font-bold text-white" id="stewardship-counter">0%</div></div>
+    <div class="wood px-4 py-1 text-center"><div class="text-xs text-[#fff3d6]">Coins</div><div class="text-xl font-bold text-yellow-200">🪙 <span id="coins">0</span></div></div>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-3">
+  <!-- LEFT -->
+  <section class="lg:col-span-3 flex flex-col gap-3">
+    <div class="wood p-4">
+      <h2 class="font-bold mb-3 text-lg">Resource Storage</h2>
+      <div id="resources" class="space-y-3 text-[#4a2a0a]"></div>
+      <div class="grid grid-cols-2 gap-2 mt-4">
+        <button class="btn" onclick="act('solar')">☀️ Sunlight</button>
+        <button class="btn blue" onclick="act('pump')">🚰 Water pump</button>
+      </div>
+      <p class="text-xs text-[#fff3d6] mt-2">Sun panels fill once a day (double on sunny days). The pump turns 10 Wh into 20 L.</p>
+    </div>
+    <div class="wood p-4">
+      <h2 class="font-bold mb-2 text-lg">Barn</h2>
+      <div id="barn" class="paper p-2 text-sm min-h-[48px]"></div>
+      <button class="btn w-full mt-3" onclick="act('ship')">🛻 Truck: sell Egg, Milk &amp; Wool at market</button>
+      <p class="text-xs text-[#fff3d6] mt-1">The truck uses 5 Wh and sells all animal goods at market price.</p>
+    </div>
+  </section>
+
+  <!-- CENTER -->
+  <section class="lg:col-span-6 flex flex-col gap-3">
+    <div class="flex gap-2">
+      <button onclick="switchTab('game')" id="tab-game" class="btn green sel">🌾 Farm</button>
+      <button onclick="switchTab('market')" id="tab-market" class="btn">🏪 Market</button>
+      <button onclick="switchTab('code')" id="tab-code" class="btn">💻 Student Code Editor</button>
+    </div>
+
+    <div id="view-game" class="wood p-4">
+      <h2 class="font-bold text-lg mb-2">Animal Pens</h2>
+      <div id="pens" class="grid grid-cols-4 gap-2 mb-4"></div>
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <h2 class="font-bold text-lg">Sanctuary Garden Grid</h2>
+        <div id="crop-selector" class="flex gap-1 flex-wrap"></div>
+      </div>
+      <div class="flex flex-wrap gap-2 mb-2">
+        <button id="tool-plant" class="btn green sel text-sm" onclick="setTool('plant')">🌱 Plant / Harvest</button>
+        <button id="tool-water" class="btn blue text-sm" onclick="setTool('water')">🚿 Watering can</button>
+        <button class="btn blue text-sm" onclick="act('water_all')">💦 Water all crops</button>
+        <button class="btn text-sm" onclick="act('feed_all')">🌾 Feed all animals</button>
+      </div>
+      <p class="text-xs text-[#fff3d6] mb-2">Crops only grow on days they are watered (planting waters once, the can costs 3 L, rain waters everything). Harvest Wheat, then feed animals: fed animals make Egg, Milk or Wool by tomorrow.</p>
+      <div id="garden-grid" class="grid grid-cols-5 gap-2"></div>
+    </div>
+
+    <div id="view-market" class="wood p-4 hidden">
+      <h2 class="font-bold text-lg mb-1">Market (a tree, shown by preorder traversal)</h2>
+      <p class="text-xs text-[#fff3d6] mb-2">Coins buy seeds and animals. Sell crops and animal goods for coins.</p>
+      <div id="market" class="paper p-3 space-y-1.5"></div>
+      <h2 class="font-bold text-lg mt-4 mb-1">Hierarchical tree diagram</h2>
+      <p class="text-xs text-[#fff3d6] mb-2">Topic 4 in action. DFS = preorder number (MarketTree.preorder builds the list above, find() uses it when you buy). BFS = level-order number (MarketTree.level_order).</p>
+      <div id="tree-diagram" class="paper p-3 overflow-x-auto"></div>
+    </div>
+
+    <div id="view-code" class="wood p-4 hidden flex flex-col">
+      <h2 class="font-bold text-lg mb-2">Student Code Editor (Lab)</h2>
+      <select id="topic-selector" onchange="loadTopic()" class="paper p-2 mb-3 text-sm"></select>
+      <textarea id="code-editor" readonly spellcheck="false" class="code-font text-sm bg-[#1b2219] text-emerald-100 rounded-xl p-3 h-96 border-2 border-[#5b3512]"></textarea>
+      <button onclick="runPythonCode()" class="btn green mt-3">▶ Run this topic's demo</button>
+      <div id="output-console" class="mt-3 bg-black/80 text-emerald-200 rounded-xl p-3 text-xs max-h-48 overflow-auto code-font"></div>
+    </div>
+  </section>
+
+  <!-- RIGHT -->
+  <section class="lg:col-span-3 flex flex-col gap-3">
+    <div class="wood p-4">
+      <h3 class="font-bold mb-1">Climate Queue (FIFO)</h3>
+      <p id="weather-tip" class="text-xs text-[#fff3d6] mb-2"></p>
+      <div id="climate-queue" class="flex gap-2 mb-3"></div>
+      <button class="btn green w-full" onclick="act('next_day')">🌙 Next day</button>
+    </div>
+    <div class="wood p-4">
+      <h3 class="font-bold mb-2">Delivery Orders (BST)</h3>
+      <div id="orders" class="space-y-1.5 text-sm mb-3"></div>
+      <button class="btn w-full" onclick="act('deliver')">🚚 Send delivery truck</button>
+    </div>
+    <div class="wood p-4 flex-1">
+      <h3 class="font-bold mb-2">Action History (Stack)</h3>
+      <div id="action-stack" class="space-y-1.5 text-xs mb-3 min-h-[40px]"></div>
+      <button class="btn blue w-full" onclick="act('undo')">↩ Undo (stack pop)</button>
+    </div>
+  </section>
+</main>
+
+<script>
+//=========================================================================
+// SEMANTIC VERSIONING (SemVer 2.0.0) - single source of truth.
+// MAJOR: breaking change (bridge names/signatures Python depends on)
+// MINOR: new backward-compatible feature (e.g. finishing a topic)
+// PATCH: bug fix with no new feature. Use 0.x.y until all 11 topics are done.
+// 0.3.0: topics 1-5 coded and connected into a playable game.
+// 0.4.0: watering can, feed-all, market truck, hierarchical tree diagram.
+//=========================================================================
+const APP_VERSION = "0.4.0";
+let pyodideInstance = null, lastJson = null, sel = "Carrot", firstRender = true, tool = "plant";
+const $ = id => document.getElementById(id);
+
+//=========================================================================
+// TOPICS 1-5: the whole game is Python. They run in order and share one
+// namespace, so each topic builds on the one before it.
+//=========================================================================
+const topicTemplates = {
+1: { title: "Python OOP + Big O + Stacks", code: `# Topic 1: Python OOP + Big O + Stacks
+import copy, random
+CAPS = {"water": 200, "energy": 120, "hope": 100}
+
+class Resources:
+    """Everything the farm owns. Dict lookups are O(1)."""
+    def __init__(self):
+        self.water, self.energy, self.hope, self.coins = 40, 30, 50, 60
+        self.seeds = {"Carrot": 2, "Wheat": 3, "Corn": 0}
+    def total_seeds(self):                 # O(k), k = crop types
+        return sum(self.seeds.values())
+    def gain(self, name, amount):          # O(1), clamped to the storage cap
+        cur = getattr(self, name) + amount
+        setattr(self, name, max(0, min(CAPS.get(name, 10**9), cur)))
+    def spend(self, **cost):               # all-or-nothing purchase
+        if any(getattr(self, k) < v for k, v in cost.items()):
+            return False
+        for k, v in cost.items():
+            self.gain(k, -v)
+        return True
+
+class Animal:                              # base class
+    emoji, product, cost, water_need = "🐾", "Egg", 20, 1
+    def __init__(self):
+        self.fed = False
+    def produce(self):                     # O(1), polymorphic via product
+        if self.fed:
+            self.fed = False
+            return self.product
+        return None
+
+class Hen(Animal):   emoji, product, cost, water_need = "🐔", "Egg", 20, 1
+class Cow(Animal):   emoji, product, cost, water_need = "🐄", "Milk", 60, 5
+class Sheep(Animal): emoji, product, cost, water_need = "🐑", "Wool", 40, 2
+ANIMALS = {"Hen": Hen, "Cow": Cow, "Sheep": Sheep}
+
+class ActionStack:
+    """LIFO history for Undo. push and pop are both O(1)."""
+    def __init__(self):
+        self.items = []
+    def push(self, label, snapshot):
+        self.items.append((label, snapshot))
+    def pop(self):
+        return self.items.pop() if self.items else None
+    def clear(self):
+        self.items.clear()
+
+class Game:
+    STATE = ["res", "farm", "climate", "orders", "barn", "day", "sun_used"]
+    def __init__(self):
+        self.res, self.barn = Resources(), {}
+        self.day, self.sun_used, self.msg = 1, False, "Welcome to the farm!"
+        self.history = ActionStack()
+        # These classes come from topics 2-5:
+        self.farm, self.climate = Farm(), ClimateQueue()
+        self.market, self.orders = MarketTree(), OrderBST()
+        self.new_orders(3)
+    def ok(self, text):
+        self.msg = text
+        return True
+    def fail(self, text):
+        self.msg = text
+        return False
+    def act(self, name, arg=None):
+        before = copy.deepcopy({k: getattr(self, k) for k in self.STATE})  # O(n) snapshot
+        if getattr(self, "do_" + name)(arg) and name not in ("next_day", "undo"):
+            self.history.push(self.msg, before)                           # O(1)
+    def do_undo(self, _):
+        item = self.history.pop()
+        if not item:
+            return self.fail("Nothing to undo.")
+        for k, v in item[1].items():
+            setattr(self, k, v)
+        return self.ok("Undid: " + item[0])
+    def do_pump(self, _):
+        if not self.res.spend(energy=10):
+            return self.fail("The water pump needs 10 Wh of energy.")
+        self.res.gain("water", 20)
+        return self.ok("Pumped 20 L of water")
+    def do_solar(self, _):
+        if self.sun_used:
+            return self.fail("Panels are empty until tomorrow.")
+        watts = 60 if self.climate.today() == "Sunny" else 30
+        self.sun_used = True
+        self.res.gain("energy", watts)
+        return self.ok(f"Collected {watts} Wh of sunlight")
+
+if DEMO:
+    r = Resources()
+    print("seeds:", r.total_seeds(), "| spend 100c ->", r.spend(coins=100))
+    for a in (Hen(), Cow(), Sheep()):
+        a.fed = True
+        print(a.emoji, type(a).__name__, "makes", a.produce())
+    s = ActionStack(); s.push("plant", 1); s.push("harvest", 2)
+    print("pop ->", s.pop()[0], "| push O(1), pop O(1), undo snapshot O(n)")
+` },
+2: { title: "Queues & Deques (FIFO Elements)", code: `# Topic 2: Queues & Deques (FIFO Elements)
+from collections import deque
+WEATHER = {"Sunny": "☀️", "Rain": "🌧️", "Drought": "🔥", "Storm": "⛈️"}
+
+class ClimateQueue:
+    """FIFO forecast: the front is today, new weather joins at the back."""
+    def __init__(self, days=4):
+        self.q = deque(random.choice(list(WEATHER)) for _ in range(days))
+    def today(self):
+        return self.q[0]                                  # O(1)
+    def next_day(self):
+        self.q.popleft()                                  # O(1) dequeue (list.pop(0) is O(n))
+        self.q.append(random.choice(list(WEATHER)))       # O(1) enqueue
+        return self.q[0]
+
+def apply_weather(self):
+    w, r = self.climate.today(), self.res
+    if w == "Rain":
+        r.gain("water", 30)
+        for row in self.farm.grid:
+            for p in row:
+                if p.crop:
+                    p.watered = True
+        return "Rain filled the tank (+30 L) and watered every crop."
+    if w == "Drought":
+        r.gain("water", -20)
+        return "Drought dried the tank (-20 L)."
+    if w == "Storm":
+        r.gain("hope", -10)
+        return "A storm shook the village (-10 hope)."
+    return "Sunny skies, panels give double power."
+Game.apply_weather = apply_weather
+
+if DEMO:
+    c = ClimateQueue()
+    print("forecast:", list(c.q), "| today:", c.today())
+    c.next_day()
+    print("after next_day:", list(c.q), "| today:", c.today())
+` },
+3: { title: "Static/Dynamic Arrays, 2D Lists, & Memory Structures", code: `# Topic 3: Static/Dynamic Arrays, 2D Lists, & Memory Structures
+# emoji, seed price, days to grow, sell price
+CROPS = {"Carrot": ("🥕", 5, 2, 12), "Wheat": ("🌾", 3, 1, 7), "Corn": ("🌽", 8, 3, 22)}
+
+class Plot:
+    def __init__(self):
+        self.crop, self.age, self.watered = None, 0, False
+    def ripe(self):
+        return self.crop is not None and self.age >= CROPS[self.crop][2]
+
+class Farm:
+    def __init__(self, rows=5, cols=5, pens=4):
+        self.cols = cols
+        self.grid = [[Plot() for _ in range(cols)] for _ in range(rows)]  # 2D list
+        self.pens = [None] * pens                                          # fixed-size array
+    def plot(self, i):
+        return self.grid[i // self.cols][i % self.cols]   # flat index -> (row, col), O(1)
+    def grow_all(self):                                   # O(rows * cols)
+        for row in self.grid:
+            for p in row:
+                if p.crop and p.watered:      # only watered crops grow
+                    p.age += 1
+                p.watered = False             # thirsty again tomorrow
+    def add_animal(self, animal):                         # O(n) scan for a free slot
+        for i, slot in enumerate(self.pens):
+            if slot is None:
+                self.pens[i] = animal
+                return i
+        return -1
+
+def do_tile(self, arg):                                   # arg looks like "12:Carrot"
+    i, crop = arg.split(":")
+    p = self.farm.plot(int(i))
+    if p.ripe():
+        name, p.crop, p.age = p.crop, None, 0
+        self.barn[name] = self.barn.get(name, 0) + 1
+        return self.ok(f"Harvested {name}")
+    if p.crop:
+        return self.fail(f"{p.crop} needs {CROPS[p.crop][2] - p.age} more day(s).")
+    if self.res.seeds.get(crop, 0) < 1:
+        return self.fail(f"No {crop} seeds. Buy some at the market.")
+    if not self.res.spend(water=5):
+        return self.fail("Planting needs 5 L of water. Use the pump!")
+    self.res.seeds[crop] -= 1
+    p.crop, p.age, p.watered = crop, 0, True   # planting waters the seed once
+    return self.ok(f"Planted {crop}")
+
+def do_feed(self, i):
+    a = self.farm.pens[int(i)]
+    if a is None:
+        return self.fail("Empty pen. Buy an animal at the market.")
+    if a.fed:
+        return self.fail("Already fed today.")
+    if self.barn.get("Wheat", 0) < 1:
+        return self.fail("Feed needs 1 Wheat in the barn.")
+    if not self.res.spend(water=a.water_need):
+        return self.fail(f"This animal needs {a.water_need} L of water.")
+    self.barn["Wheat"] -= 1
+    a.fed = True
+    return self.ok(f"Fed the {type(a).__name__}")
+def do_water(self, i):                                    # pour the watering can on one crop
+    p = self.farm.plot(int(i))
+    if not p.crop:
+        return self.fail("Nothing planted here to water.")
+    if p.ripe():
+        return self.fail("It is already ripe. Harvest it!")
+    if p.watered:
+        return self.fail("Already watered today.")
+    if not self.res.spend(water=3):
+        return self.fail("The watering can needs 3 L of water. Use the pump!")
+    p.watered = True
+    return self.ok(f"Poured water on the {p.crop}")
+
+def do_water_all(self, _):                                # O(rows * cols)
+    n = 0
+    for row in self.farm.grid:
+        for p in row:
+            if p.crop and not p.ripe() and not p.watered and self.res.spend(water=3):
+                p.watered = True
+                n += 1
+    return self.ok(f"Watered {n} crop(s)") if n else self.fail("No thirsty crops, or not enough water.")
+
+def do_feed_all(self, _):
+    n = 0
+    for i, a in enumerate(self.farm.pens):
+        if a and not a.fed and self.barn.get("Wheat", 0) >= 1 and self.res.water >= a.water_need:
+            self.do_feed(i)
+            n += 1
+    return self.ok(f"Fed {n} animal(s)") if n else self.fail("No hungry animals, or missing Wheat/water.")
+Game.do_tile, Game.do_feed = do_tile, do_feed
+Game.do_water, Game.do_water_all, Game.do_feed_all = do_water, do_water_all, do_feed_all
+
+if DEMO:
+    f = Farm()
+    f.plot(7).crop = "Carrot"
+    print("index 7 -> row", 7 // f.cols, "col", 7 % f.cols, "| grid[1][2]:", f.grid[1][2].crop)
+    print("added at pen", f.add_animal(Hen()), "->", [type(x).__name__ if x else None for x in f.pens])
+` },
+4: { title: "Hierarchical Trees & Traversals", code: `# Topic 4: Hierarchical Trees & Traversals
+PRICE = {k: v[3] for k, v in CROPS.items()}
+PRICE.update(Egg=10, Milk=25, Wool=18)
+EMOJI = {k: v[0] for k, v in CROPS.items()}
+EMOJI.update(Egg="🥚", Milk="🥛", Wool="🧶")
+
+class TreeNode:
+    def __init__(self, name, kind="group", price=0, emoji=""):
+        self.name, self.kind, self.price, self.emoji = name, kind, price, emoji
+        self.children = []
+    def add(self, child):
+        self.children.append(child)
+        return self
+
+class MarketTree:
+    def __init__(self):
+        seeds, animals, goods = TreeNode("Seeds"), TreeNode("Animals"), TreeNode("Sell goods")
+        for n, (e, cost, _, _) in CROPS.items():
+            seeds.add(TreeNode(n, "seed", cost, e))
+        for n, c in ANIMALS.items():
+            animals.add(TreeNode(n, "animal", c.cost, c.emoji))
+        for n, p in PRICE.items():
+            goods.add(TreeNode(n, "good", p, EMOJI[n]))
+        self.root = TreeNode("Market").add(seeds).add(animals).add(goods)
+    def preorder(self, node=None, depth=0):          # DFS: node, then children. O(n)
+        node = node or self.root
+        yield node, depth
+        for c in node.children:
+            yield from self.preorder(c, depth + 1)
+    def level_order(self):                           # BFS with a queue. O(n)
+        q = deque([self.root])
+        while q:
+            n = q.popleft()
+            yield n
+            q.extend(n.children)
+    def find(self, name):                            # O(n) search
+        return next((n for n, _ in self.preorder() if n.name == name), None)
+
+def do_buy(self, name):
+    n = self.market.find(name)
+    if n.kind == "animal" and self.farm.pens.count(None) == 0:
+        return self.fail("All pens are full.")
+    if not self.res.spend(coins=n.price):
+        return self.fail(f"{name} costs {n.price} coins.")
+    if n.kind == "seed":
+        self.res.seeds[name] += 1
+    else:
+        self.farm.add_animal(ANIMALS[name]())
+    return self.ok(f"Bought {name} for {n.price}c")
+
+def do_sell(self, name):
+    if self.barn.get(name, 0) < 1:
+        return self.fail(f"No {name} in the barn.")
+    self.barn[name] -= 1
+    self.res.coins += PRICE[name]
+    return self.ok(f"Sold {name} for {PRICE[name]}c")
+Game.do_buy, Game.do_sell = do_buy, do_sell
+
+if DEMO:
+    m = MarketTree()
+    for n, d in m.preorder():
+        print("  " * d + n.name)
+    print("level order:", [n.name for n in m.level_order()][:5], "...")
+` },
+5: { title: "Binary Search Trees (BST) & Node Mutation", code: `# Topic 5: Binary Search Trees (BST) & Node Mutation
+import json, js
+
+class OrderNode:
+    def __init__(self, key, item, qty):
+        self.key, self.item, self.qty = key, item, qty
+        self.left = self.right = None
+
+class OrderBST:
+    """Delivery orders sorted by (reward, id). O(log n) on average, O(n) worst case."""
+    def __init__(self):
+        self.root, self.size, self.next_id = None, 0, 0
+    def insert(self, reward, item, qty):
+        self.next_id += 1
+        self.size += 1
+        node = OrderNode((reward, self.next_id), item, qty)
+        if not self.root:
+            self.root = node
+            return node
+        cur = self.root
+        while True:
+            side = "left" if node.key < cur.key else "right"
+            if getattr(cur, side) is None:
+                setattr(cur, side, node)
+                return node
+            cur = getattr(cur, side)
+    def reverse_order(self, node=False):             # right, node, left = richest first
+        node = self.root if node is False else node
+        if node:
+            yield from self.reverse_order(node.right)
+            yield node
+            yield from self.reverse_order(node.left)
+    def delete(self, key):
+        self.root = self._delete(self.root, key)
+        self.size -= 1
+    def _delete(self, node, key):                    # node mutation / re-linking
+        if node is None:
+            return None
+        if key < node.key:
+            node.left = self._delete(node.left, key)
+        elif key > node.key:
+            node.right = self._delete(node.right, key)
+        else:
+            if node.left is None:
+                return node.right
+            if node.right is None:
+                return node.left
+            nxt = node.right
+            while nxt.left:                          # in-order successor
+                nxt = nxt.left
+            node.key, node.item, node.qty = nxt.key, nxt.item, nxt.qty
+            node.right = self._delete(node.right, nxt.key)
+        return node
+
+def new_orders(self, n=1):
+    for _ in range(n):
+        if self.orders.size >= 6:
+            return
+        item, qty = random.choice(list(PRICE)), random.randint(1, 3)
+        self.orders.insert(round(PRICE[item] * qty * 1.5), item, qty)
+
+def do_deliver(self, _):
+    for o in self.orders.reverse_order():            # try the richest order first
+        if self.barn.get(o.item, 0) >= o.qty:
+            self.barn[o.item] -= o.qty
+            self.res.coins += o.key[0]
+            self.res.gain("hope", 8)
+            self.orders.delete(o.key)
+            return self.ok(f"Truck delivered {o.qty} {o.item}: +{o.key[0]}c, +8 hope")
+    return self.fail("Your barn can't fill any order yet.")
+
+def do_next_day(self, _):
+    made = []
+    for a in self.farm.pens:
+        p = a.produce() if a else None
+        if p:
+            self.barn[p] = self.barn.get(p, 0) + 1
+            made.append(p)
+    self.farm.grow_all()
+    self.climate.next_day()
+    note = self.apply_weather()
+    self.day += 1
+    self.sun_used = False
+    self.new_orders(random.randint(1, 2))
+    self.history.clear()
+    return self.ok(f"Day {self.day}: {note}" + (f" Animals made {', '.join(made)}." if made else ""))
+
+def do_ship(self, _):                                # truck carries animal goods to the market
+    load = {k: self.barn[k] for k in ("Egg", "Milk", "Wool") if self.barn.get(k, 0) > 0}
+    if not load:
+        return self.fail("No animal goods in the barn yet. Feed your animals first!")
+    if not self.res.spend(energy=5):
+        return self.fail("The truck needs 5 Wh of energy.")
+    total = 0
+    for k, n in load.items():
+        total += PRICE[k] * n
+        self.barn[k] = 0
+    self.res.coins += total
+    return self.ok(f"Truck sold {sum(load.values())} goods at the market: +{total}c")
+
+def view(self):                                      # everything the UI needs, as plain data
+    r, tiles = self.res, []
+    for row in self.farm.grid:
+        for p in row:
+            if not p.crop:
+                tiles.append({"s": "empty", "e": ""})
+            elif p.ripe():
+                tiles.append({"s": "ripe", "e": CROPS[p.crop][0]})
+            else:
+                tiles.append({"s": "grow", "e": "🌱", "t": CROPS[p.crop][2] - p.age, "w": p.watered})
+    return {
+        "day": self.day, "score": r.hope, "msg": self.msg,
+        "res": {"water": r.water, "seeds": r.total_seeds(), "energy": r.energy, "hope": r.hope, "coins": r.coins},
+        "seeds": r.seeds, "crops": [[n, v[0], v[1]] for n, v in CROPS.items()],
+        "weather": [[w, WEATHER[w]] for w in self.climate.q],
+        "tiles": tiles,
+        "pens": [{"e": a.emoji, "fed": a.fed, "pr": EMOJI[a.product]} if a else None for a in self.farm.pens],
+        "barn": {k: v for k, v in self.barn.items() if v},
+        "market": [{"n": n.name, "k": n.kind, "p": n.price, "e": n.emoji, "d": d} for n, d in self.market.preorder() if d],
+        "orders": [{"e": EMOJI[o.item], "item": o.item, "qty": o.qty, "reward": o.key[0]} for o in self.orders.reverse_order()],
+        "history": [label for label, _ in self.history.items[-8:]],
+        "bfs": [n.name for n in self.market.level_order()],
+    }
+Game.new_orders, Game.do_deliver, Game.do_next_day, Game.view = new_orders, do_deliver, do_next_day, view
+Game.do_ship = do_ship
+
+def handle(name, arg=None):                          # called by every button in the UI
+    game.act(name, arg)
+    js.render(json.dumps(game.view()))
+
+if DEMO:
+    t = OrderBST()
+    for reward in (30, 12, 45, 20):
+        t.insert(reward, "Egg", 1)
+    print("richest first:", [o.key[0] for o in t.reverse_order()])
+    t.delete((30, 1))
+    print("after deleting 30:", [o.key[0] for o in t.reverse_order()], "| size", t.size)
+` },
+6: { title: "Hash Tables, Collisions, & Rehashing", code: `# Topic 6: Hash Tables, Collisions, & Rehashing
+# ==== WRITE YOUR CODE HERE ====
+` },
+7: { title: "Graph Foundations, Adjacency Matrices/Lists, & DFS/BFS", code: `# Topic 7: Graph Foundations, Adjacency Matrices/Lists, & DFS/BFS
+# ==== WRITE YOUR CODE HERE ====
+` },
+8: { title: "Sorting Algorithms (Bubble, Insertion, Selection, Quick, & Merge Sort)", code: `# Topic 8: Sorting Algorithms (Bubble, Insertion, Selection, Quick, & Merge Sort)
+# ==== WRITE YOUR CODE HERE ====
+` },
+9: { title: "Searching Algorithms (Linear Search vs. Binary Search)", code: `# Topic 9: Searching Algorithms (Linear Search vs. Binary Search)
+# ==== WRITE YOUR CODE HERE ====
+` },
+10: { title: "Advanced Strategic Paradigms (Dijkstra's Algorithm & Greedy Patterns)", code: `# Topic 10: Advanced Strategic Paradigms (Dijkstra's Algorithm & Greedy Patterns)
+# ==== WRITE YOUR CODE HERE ====
+` },
+11: { title: "Dynamic Programming (DP), Memoization, & Divide-and-Conquer", code: `# Topic 11: Dynamic Programming (DP), Memoization, & Divide-and-Conquer
+# ==== WRITE YOUR CODE HERE ====
+` }
+};
+
+async function initPyodide() {
+  const con = $("output-console");
+  if (pyodideInstance) return;
+  con.innerHTML = `<span class="text-amber-300">Loading Python...</span><br>`;
+  try {
+    pyodideInstance = await loadPyodide();
+    await pyodideInstance.runPythonAsync(`
+import sys
+from js import document
+class Console:
+    def write(self, t):
+        el = document.getElementById("output-console")
+        el.innerHTML += t.replace("&", "&amp;").replace("<", "&lt;").replace(chr(10), "<br>")
+    def flush(self): pass
+sys.stdout = Console()`);
+    pyodideInstance.globals.set("DEMO", false);
+    for (let k = 1; k <= 5; k++) await pyodideInstance.runPythonAsync(topicTemplates[k].code);
+    await pyodideInstance.runPythonAsync(`game = Game()\njs.render(json.dumps(game.view()))`);
+    con.innerHTML = `<span class="text-emerald-300">Python ready. Topics 1-5 are running the game.</span><br>`;
+  } catch (err) {
+    pyodideInstance = null;
+    con.innerHTML = `<span class="text-red-400">Failed to load Python: ${err.message}</span>`;
+    throw err;
+  }
+}
+
+// Every button calls Python: handle(name, arg) -> game.act() -> js.render(json)
+function act(name, arg = null) {
+  if (!pyodideInstance) return showToast("Python is still loading...");
+  try { pyodideInstance.globals.get("handle")(name, arg); }
+  catch (e) { showToast("Python error: " + e.message.split("\n").slice(-2)[0]); }
+}
+
+function render(json) {
+  lastJson = json;
+  const v = JSON.parse(json);
+  $("day-counter").textContent = v.day;
+  $("stewardship-counter").textContent = v.score + "%";
+  $("coins").textContent = v.res.coins;
+
+  const bars = [["💧 Water", "water", 200, "L", "from-sky-500 to-cyan-300"], ["🌱 Seeds", "seeds", 100, "", "from-emerald-500 to-lime-400"],
+    ["☀️ Solar energy", "energy", 120, "Wh", "from-amber-500 to-yellow-300"], ["💖 Community hope", "hope", 100, "", "from-rose-500 to-pink-400"]];
+  $("resources").innerHTML = bars.map(([l, k, m, u, g]) => `<div>
+    <div class="flex justify-between text-sm font-semibold"><span>${l}</span><span>${v.res[k]} / ${m} ${u}</span></div>
+    <div class="h-3 rounded-full bg-black/30 overflow-hidden"><div class="h-full rounded-full bg-gradient-to-r ${g}" style="width:${Math.min(100, v.res[k] / m * 100)}%"></div></div></div>`).join("");
+
+  const em = {}; v.market.forEach(m => em[m.n] = m.e);
+  const barn = Object.entries(v.barn);
+  $("barn").innerHTML = barn.length ? barn.map(([k, n]) => `<span class="inline-block mr-3">${em[k]} ${k} ×${n}</span>`).join("") : "The barn is empty. Harvest crops or wait for animal goods.";
+
+  $("crop-selector").innerHTML = v.crops.map(([n, e]) =>
+    `<button class="btn ${n === sel ? "green sel" : ""} text-sm" onclick="sel='${n}';render(lastJson)">${e} ${n} ×${v.seeds[n]}</button>`).join("");
+
+  $("garden-grid").innerHTML = v.tiles.map((t, i) =>
+    `<button class="soil ${t.s === "ripe" ? "ripe" : ""}" onclick="tileClick(${i})" aria-label="Plot ${i + 1}">
+      <span class="${t.s === "ripe" ? "animate-bounce" : "opacity-" + (t.s === "empty" ? "20" : "100")}">${t.e || "＋"}</span>
+      ${t.t ? `<span class="text-[10px] text-amber-100">${t.w ? "💧" : "dry"} ${t.t}d</span>` : ""}</button>`).join("");
+
+  $("pens").innerHTML = v.pens.map((p, i) => p
+    ? `<button class="pen" onclick="act('feed',${i})"><span class="${p.fed ? "hop" : ""}">${p.e}</span><span class="text-[10px] font-semibold leading-tight">${p.fed ? "fed ✓ makes " + p.pr + " tomorrow" : "hungry, feed me"}</span></button>`
+    : `<div class="pen opacity-60"><span>🪹</span><span class="text-xs">empty</span></div>`).join("");
+
+  $("market").innerHTML = v.market.map(m => {
+    if (m.k === "seed" || m.k === "animal") return `<div class="flex justify-between items-center" style="margin-left:1.2rem"><span>${m.e} ${m.n}</span><button class="btn text-sm" onclick="act('buy','${m.n}')">Buy ${m.p}🪙</button></div>`;
+    if (m.k === "good") return `<div class="flex justify-between items-center" style="margin-left:1.2rem"><span>${m.e} ${m.n} <span class="text-xs opacity-70">(you have ${v.barn[m.n] || 0})</span></span><button class="btn green text-sm" onclick="act('sell','${m.n}')">Sell ${m.p}🪙</button></div>`;
+    return `<div class="font-bold border-b border-[#7a4a1c]/30 mt-2">${m.n}</div>`;
+  }).join("");
+
+  const bfs = {}; (v.bfs || []).forEach((n, i) => bfs[n] = i + 1);
+  let k = 1; const dfs = { Market: 1 }; v.market.forEach(m => dfs[m.n] = ++k);
+  const box = (n, e) => `<div class="paper px-2 py-1 text-center text-xs font-semibold whitespace-nowrap">${e || ""} ${n}<div class="text-[10px] font-normal opacity-70">DFS ${dfs[n]} · BFS ${bfs[n]}</div></div>`;
+  const groups = []; v.market.forEach(m => { if (m.d === 1) groups.push({ n: m.n, items: [] }); else groups[groups.length - 1].items.push(m); });
+  $("tree-diagram").innerHTML = `<div class="flex flex-col items-center min-w-[420px]">${box("Market", "🏪")}<div class="w-0.5 h-4 bg-[#7a4a1c]"></div>
+    <div class="flex gap-4 items-start border-t-2 border-[#7a4a1c]">${groups.map(g => `<div class="flex flex-col items-start"><div class="w-0.5 h-4 bg-[#7a4a1c] self-center"></div>${box(g.n)}
+      <div class="border-l-2 border-[#7a4a1c] ml-4 flex flex-col gap-1 py-1">${g.items.map(m => `<div class="flex items-center"><span class="w-3 h-0.5 bg-[#7a4a1c]"></span>${box(m.n, m.e)}</div>`).join("")}</div></div>`).join("")}</div></div>`;
+
+  const tips = { Sunny: "Sunny: sun panels give double power.", Rain: "Rain: +30 L water and every crop is watered.", Drought: "Drought: -20 L water.", Storm: "Storm: -10 community hope." };
+  $("weather-tip").textContent = "Today: " + tips[v.weather[0][0]];
+  $("climate-queue").innerHTML = v.weather.map(([w, e], i) =>
+    `<div class="paper text-center px-2 py-1 flex-1 ${i === 0 ? "ring-4 ring-yellow-300" : "opacity-80"}"><div class="text-2xl">${e}</div><div class="text-[10px] font-semibold">${i === 0 ? "Today" : "+" + i}</div></div>`).join("");
+
+  $("orders").innerHTML = v.orders.length ? v.orders.map(o =>
+    `<div class="paper px-2 py-1 flex justify-between"><span>${o.qty}× ${o.e} ${o.item}</span><b>+${o.reward}🪙</b></div>`).join("") : "No orders yet. New ones arrive each day.";
+  $("action-stack").innerHTML = v.history.length ? [...v.history].reverse().map(h =>
+    `<div class="paper px-2 py-1 border-l-4 border-l-amber-500">${h}</div>`).join("") : "No actions to undo today.";
+
+  if (!firstRender) showToast(v.msg);
+  firstRender = false;
+}
+
+function tileClick(i) { tool === "water" ? act("water", i) : act("tile", i + ":" + sel); }
+function setTool(t) { tool = t; ["plant", "water"].forEach(x => $("tool-" + x).classList.toggle("sel", x === t)); }
+
+function showToast(msg) {
+  const t = document.createElement("div");
+  t.className = "fixed bottom-6 right-6 bg-[#fff3d6] border-4 border-[#7a4a1c] text-[#4a2a0a] font-semibold px-5 py-3 rounded-2xl shadow-2xl z-50 text-sm max-w-xs";
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2800);
+}
+
+async function runPythonCode() {
+  const con = $("output-console");
+  con.innerHTML = `<span class="text-amber-300">Running...</span><br>`;
+  try {
+    await initPyodide();
+    pyodideInstance.globals.set("DEMO", true);
+    con.innerHTML = "";
+    await pyodideInstance.runPythonAsync($("code-editor").value);
+    pyodideInstance.globals.set("DEMO", false);
+  } catch (err) {
+    con.innerHTML += `<span class="text-red-400">Error: ${err.message}</span>`;
+  }
+}
+
+function loadTopic() { $("code-editor").value = topicTemplates[$("topic-selector").value].code; }
+
+function switchTab(tab) {
+  ["game", "market", "code"].forEach(t => {
+    $("view-" + t).classList.toggle("hidden", t !== tab);
+    $("tab-" + t).classList.toggle("green", t === tab);
+    $("tab-" + t).classList.toggle("sel", t === tab);
+  });
+}
+
+window.onload = () => {
+  $("version-badge").textContent = "v" + APP_VERSION;
+  const select = $("topic-selector");
+  Object.keys(topicTemplates).forEach(k => {
+    const opt = document.createElement("option");
+    opt.value = k; opt.textContent = k + ". " + topicTemplates[k].title;
+    select.appendChild(opt);
+  });
+  loadTopic();
+  switchTab("game");
+  initPyodide().catch(() => {});
+};
+</script>
+</body>
+</html>
