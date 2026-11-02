@@ -951,8 +951,127 @@ if not DEMO and not hasattr(Game, "_hash_ready"):
 # ==== WRITE YOUR CODE HERE ====
 ` },
 8: { title: "Sorting Algorithms (Bubble, Insertion, Selection, Quick, & Merge Sort)", code: `# Topic 8: Sorting Algorithms (Bubble, Insertion, Selection, Quick, & Merge Sort)
-# ==== WRITE YOUR CODE HERE ====
-` },
+class SortStats:
+    """Counts the work each algorithm does so we can compare them."""
+    def __init__(self):
+        self.comparisons = 0
+        self.moves = 0
+
+def bubble_sort(data, key=lambda x: x):          # best O(n), avg/worst O(n^2), space O(1)
+    arr, stats = list(data), SortStats()
+    for i in range(len(arr) - 1):
+        swapped = False
+        for j in range(len(arr) - 1 - i):
+            stats.comparisons += 1
+            if key(arr[j]) > key(arr[j + 1]):
+                arr[j], arr[j + 1] = arr[j + 1], arr[j]
+                stats.moves += 1
+                swapped = True
+        if not swapped:                          # no swaps -> already sorted
+            break
+    return arr, stats
+
+def insertion_sort(data, key=lambda x: x):       # best O(n), avg/worst O(n^2), space O(1)
+    arr, stats = list(data), SortStats()
+    for i in range(1, len(arr)):
+        item, j = arr[i], i - 1
+        while j >= 0:
+            stats.comparisons += 1
+            if key(arr[j]) > key(item):
+                arr[j + 1] = arr[j]              # shift bigger item right
+                stats.moves += 1
+                j -= 1
+            else:
+                break
+        arr[j + 1] = item
+    return arr, stats
+
+def selection_sort(data, key=lambda x: x):       # always O(n^2), space O(1)
+    arr, stats = list(data), SortStats()
+    for i in range(len(arr) - 1):
+        low = i
+        for j in range(i + 1, len(arr)):
+            stats.comparisons += 1
+            if key(arr[j]) < key(arr[low]):
+                low = j
+        if low != i:
+            arr[i], arr[low] = arr[low], arr[i]
+            stats.moves += 1
+    return arr, stats
+
+def quick_sort(data, key=lambda x: x):           # best/avg O(n log n), worst O(n^2), space O(log n)
+    arr, stats = list(data), SortStats()
+    def sort(lo, hi):
+        if lo >= hi:
+            return
+        mid = (lo + hi) // 2
+        arr[mid], arr[hi] = arr[hi], arr[mid]    # middle element becomes the pivot
+        pivot, i = key(arr[hi]), lo
+        for j in range(lo, hi):
+            stats.comparisons += 1
+            if key(arr[j]) < pivot:
+                arr[i], arr[j] = arr[j], arr[i]
+                stats.moves += 1
+                i += 1
+        arr[i], arr[hi] = arr[hi], arr[i]
+        stats.moves += 1
+        sort(lo, i - 1)
+        sort(i + 1, hi)
+    sort(0, len(arr) - 1)
+    return arr, stats
+
+def merge_sort(data, key=lambda x: x):           # always O(n log n), space O(n)
+    stats = SortStats()
+    def split(arr):
+        if len(arr) <= 1:
+            return arr
+        mid = len(arr) // 2
+        left, right = split(arr[:mid]), split(arr[mid:])
+        out, i, j = [], 0, 0
+        while i < len(left) and j < len(right):
+            stats.comparisons += 1
+            if key(left[i]) <= key(right[j]):    # <= keeps equal items stable
+                out.append(left[i])
+                i += 1
+            else:
+                out.append(right[j])
+                j += 1
+            stats.moves += 1
+        return out + left[i:] + right[j:]
+    return split(list(data)), stats
+
+ALGORITHMS = [("Bubble", bubble_sort), ("Insertion", insertion_sort),
+              ("Selection", selection_sort), ("Quick", quick_sort), ("Merge", merge_sort)]
+
+def compare_all(title, items, key=lambda x: x):
+    print("== " + title + " (" + str(len(items)) + " items) ==")
+    expected = sorted(items, key=key)
+    for name, func in ALGORITHMS:
+        result, s = func(items, key)
+        ok = [key(x) for x in result] == [key(x) for x in expected]
+        print(name.ljust(10), "comparisons", str(s.comparisons).rjust(4),
+              "| moves", str(s.moves).rjust(4), "|", "OK" if ok else "WRONG")
+    print()
+
+if DEMO:
+    # 1) Market goods sorted by sell price (data from Topic 4)
+    goods = [(EMOJI[n] + " " + n, PRICE[n]) for n in PRICE]
+    result, _ = merge_sort(goods, key=lambda g: g[1])
+    print("Goods cheapest -> priciest:", [g[0] for g in result])
+    compare_all("Goods by price", goods, key=lambda g: g[1])
+
+    # 2) Today's delivery orders sorted by reward (orders come from the Topic 5 BST)
+    orders = [(o.item, o.qty, o.key[0]) for o in game.orders.reverse_order()]
+    if orders:
+        compare_all("Delivery orders by reward", orders, key=lambda o: o[2])
+
+    # 3) Same 25 plots in three situations: the Big O difference shows up here
+    random.seed(8)
+    yields = [random.randint(1, 99) for _ in range(25)]
+    compare_all("Random harvest", yields)
+    compare_all("Already sorted harvest", sorted(yields))
+    compare_all("Reverse sorted harvest", sorted(yields, reverse=True))
+`},
 9: { title: "Searching Algorithms (Linear Search vs. Binary Search)", code: `# Topic 9: Searching Algorithms (Linear Search vs. Binary Search)
 # ==== WRITE YOUR CODE HERE ====
 ` },
