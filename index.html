@@ -581,7 +581,371 @@ if DEMO:
     print("after deleting 30:", [o.key[0] for o in t.reverse_order()], "| size", t.size)
 ` },
 6: { title: "Hash Tables, Collisions, & Rehashing", code: `# Topic 6: Hash Tables, Collisions, & Rehashing
-# ==== WRITE YOUR CODE HERE ====
+import html as _html
+import js
+from js import document
+from pyodide.ffi import create_proxy
+
+TOMB = "<deleted>"                       # tombstone marker for linear probing
+
+def hash_key(key):
+    """Polynomial rolling hash (31 is the classic multiplier). O(len(key))."""
+    h = 0
+    for ch in str(key):
+        h = (h * 31 + ord(ch)) % 4294967296
+    return h
+
+def next_prime(n):                       # prime bucket counts spread keys better
+    while n < 2 or any(n % d == 0 for d in range(2, int(n ** 0.5) + 1)):
+        n += 1
+    return n
+
+class HashTable:
+    """Key -> value in O(1) on average. Two collision strategies:
+    'chain' = each bucket holds a list (separate chaining),
+    'probe' = linear probing, a type of open addressing."""
+    MAX_LOAD = 0.75
+    def __init__(self, capacity=5, mode="chain"):
+        self.mode, self.rehashes = mode, 0
+        self._reset(capacity)
+    def _reset(self, capacity):
+        self.cap = capacity
+        self.size = self.filled = self.collisions = 0
+        self.slots = [[] for _ in range(capacity)] if self.mode == "chain" else [None] * capacity
+    def _locate(self, key):              # returns (slot index, position or None, probes)
+        i = hash_key(key) % self.cap
+        if self.mode == "chain":
+            for pos, (k, _) in enumerate(self.slots[i]):
+                if k == key:
+                    return i, pos, pos + 1
+            return i, None, len(self.slots[i])
+        for n in range(self.cap):
+            j = (i + n) % self.cap
+            s = self.slots[j]
+            if s is None:
+                return j, None, n + 1
+            if not isinstance(s, str) and s[0] == key:
+                return j, 0, n + 1
+        return i, None, self.cap
+    def _insert(self, key, value):
+        i = hash_key(key) % self.cap
+        if self.mode == "chain":
+            hit = len(self.slots[i]) > 0
+            self.slots[i].append([key, value])
+            self.size += 1
+            self.filled += 1
+            self.collisions += 1 if hit else 0
+            return {"index": i, "probes": len(self.slots[i]), "collision": hit}
+        n = 0
+        while self.slots[(i + n) % self.cap] is not None and not isinstance(self.slots[(i + n) % self.cap], str):
+            n += 1
+        j = (i + n) % self.cap
+        if self.slots[j] is None:
+            self.filled += 1             # reusing a tombstone adds nothing
+        self.slots[j] = [key, value]
+        self.size += 1
+        self.collisions += 1 if n else 0
+        return {"index": j, "probes": n + 1, "collision": n > 0}
+    def put(self, key, value):           # O(1) average, O(n) when it triggers a rehash
+        idx, pos, probes = self._locate(key)
+        info = {"op": "put", "key": key, "hash": hash_key(key), "rehashed": False, "updated": False}
+        if pos is not None:
+            entry = self.slots[idx][pos] if self.mode == "chain" else self.slots[idx]
+            entry[1] = value
+            info.update(index=idx, probes=probes, collision=False, updated=True)
+        else:
+            if (self.filled + 1) / self.cap > self.MAX_LOAD:
+                self.rehash()
+                info["rehashed"] = True
+            info.update(self._insert(key, value))
+        info["cap"] = self.cap
+        return info
+    def get(self, key):                  # O(1) average
+        idx, pos, probes = self._locate(key)
+        info = {"op": "get", "key": key, "hash": hash_key(key), "cap": self.cap,
+                "index": idx, "probes": probes, "found": pos is not None, "value": None}
+        if pos is not None:
+            info["value"] = (self.slots[idx][pos] if self.mode == "chain" else self.slots[idx])[1]
+        return info
+    def remove(self, key):
+        idx, pos, probes = self._locate(key)
+        info = {"op": "del", "key": key, "hash": hash_key(key), "cap": self.cap,
+                "index": idx, "probes": probes, "found": pos is not None}
+        if pos is not None:
+            if self.mode == "chain":
+                self.slots[idx].pop(pos)
+                self.filled -= 1
+            else:
+                self.slots[idx] = TOMB   # never set to None, or probing chains would break
+            self.size -= 1
+        return info
+    def items(self):
+        for s in self.slots:
+            if self.mode == "chain":
+                for k, v in s:
+                    yield k, v
+            elif s is not None and not isinstance(s, str):
+                yield s[0], s[1]
+    def rehash(self, new_cap=None):      # O(n): every key gets a NEW slot because cap changed
+        old = list(self.items())
+        self._reset(new_cap or next_prime(self.cap * 2))
+        for k, v in old:
+            self._insert(k, v)
+        self.rehashes += 1
+        return len(old)
+    def convert(self, mode):             # same data, other collision strategy
+        t = HashTable(self.cap, mode)
+        for k, v in self.items():
+            t.put(k, v)
+        t.rehashes += self.rehashes
+        return t
+
+#=============== Interactive lab (built into the Farm tab) ===============
+def esc(x):
+    return _html.escape(str(x))
+
+def chip(k, v, sell=False):
+    btn = f'<button class="btn text-[10px] !py-0 !px-1.5 ml-1" data-act="sell" data-key="{esc(k)}">Sell</button>' if sell else ""
+    return f'<span class="inline-flex items-center bg-white border border-[#7a4a1c] rounded px-1.5 text-xs code-font">{esc(k)}<b class="ml-1 text-[#9a5a0c]">{esc(v)}</b>{btn}</span>'
+
+def table_html(t, hot=None, sell=False):
+    rows = []
+    for i, s in enumerate(t.slots):
+        ring = " bg-yellow-200 ring-2 ring-yellow-400" if i == hot else ""
+        empty = '<span class="text-xs opacity-40">empty</span>'
+        if t.mode == "chain":
+            body = ' <span class="opacity-60">&rarr;</span> '.join(chip(k, v, sell) for k, v in s) or empty
+        elif s is None:
+            body = empty
+        elif isinstance(s, str):
+            body = '<span class="text-xs text-rose-600">&#10006; deleted (tombstone)</span>'
+        else:
+            body = chip(s[0], s[1], sell)
+        rows.append(f'<div class="flex items-center gap-2 rounded px-1{ring}"><span class="code-font text-xs w-5 text-right opacity-70">{i}</span>'
+                    f'<div class="flex flex-wrap items-center gap-1 min-h-[1.5rem] flex-1 border-l-2 border-[#7a4a1c]/40 pl-2">{body}</div></div>')
+    return "".join(rows)
+
+def stats_html(t):
+    load = t.size / t.cap
+    bar = "bg-rose-500" if load > HashTable.MAX_LOAD else "bg-emerald-500"
+    return (f'<div class="flex flex-wrap gap-x-3 text-xs font-semibold mb-1"><span>Entries {t.size}</span><span>Buckets {t.cap}</span>'
+            f'<span>Load {round(load * 100)}%</span><span>Collisions {t.collisions}</span><span>Rehashes {t.rehashes}</span></div>'
+            f'<div class="relative h-2.5 rounded-full bg-black/20 mb-2"><div class="h-full rounded-full {bar}" style="width:{min(100, load * 100)}%"></div>'
+            f'<div class="absolute top-[-2px] h-3.5 w-0.5 bg-[#7a4a1c]" style="left:75%"></div></div>')
+
+def describe(info):
+    k, h, cap = info["key"], info["hash"], info["cap"]
+    s = f"{info['op']}('{k}'): hash {h} % {cap} = slot {h % cap}. "
+    if info["op"] == "put":
+        if info["rehashed"]:
+            s = f"Load passed 75%, rehashed to {cap} buckets. " + s
+        if info["updated"]:
+            s += "Key existed, value updated."
+        else:
+            s += ("COLLISION! " if info["collision"] else "") + f"Stored in slot {info['index']} after {info['probes']} probe(s)."
+    elif info["op"] == "get":
+        s += f"Found {info['value']} after {info['probes']} probe(s)." if info["found"] else f"Not found after {info['probes']} probe(s)."
+    else:
+        s += "Removed." if info["found"] else "Nothing to remove."
+    return s
+
+def log(msg):
+    hl_log.insert(0, msg)
+    del hl_log[8:]
+
+def refresh_panel():
+    el = document.getElementById
+    if el("hl-lab") is None:
+        return
+    el("hl-plant-stats").innerHTML = stats_html(plant_idx)
+    el("hl-plant").innerHTML = table_html(plant_idx, hl_hot["plant"])
+    el("hl-barn-stats").innerHTML = stats_html(barn_idx)
+    el("hl-barn").innerHTML = table_html(barn_idx, hl_hot["barn"], sell=True)
+    el("hl-stats").innerHTML = stats_html(lab)
+    el("hl-table").innerHTML = table_html(lab, hl_hot["lab"])
+    el("hl-log").innerHTML = "".join(f'<div class="border-l-4 border-l-amber-500 bg-white/60 px-2 py-0.5 mb-1 rounded">{esc(m)}</div>' for m in hl_log)
+
+def sync_barn(barn):                     # the barn is mirrored into barn_idx after every action
+    live = {k: v for k, v in barn.items() if v}
+    for k in [k for k, _ in barn_idx.items() if k not in live]:
+        barn_idx.remove(k)
+    for k, v in live.items():
+        e = barn_idx.get(k)
+        if not e["found"] or e["value"] != v:
+            hl_hot["barn"] = barn_idx.put(k, v)["index"]
+
+def on_click(event):
+    global lab
+    try:
+        btn = event.target.closest("button")
+        act = btn.getAttribute("data-act") if btn is not None else None
+        if act is None:
+            return
+        if act == "sell":                # lookup in the barn index, then the normal game sell
+            handle("sell", btn.getAttribute("data-key"))
+            return
+        key = document.getElementById("hl-key").value.strip()
+        raw = document.getElementById("hl-val").value.strip()
+        val = int(raw) if raw.lstrip("-").isdigit() else (raw or 1)
+        if act in ("put", "get", "del") and not key:
+            log("Type a key first (try 'Silo').")
+        elif act == "put":
+            info = lab.put(key, val)
+            hl_hot["lab"] = info["index"]
+            log(describe(info))
+        elif act == "get":
+            info = lab.get(key)
+            hl_hot["lab"] = info["index"]
+            log(describe(info))
+        elif act == "del":
+            info = lab.remove(key)
+            hl_hot["lab"] = info["index"]
+            log(describe(info))
+        elif act == "grow":
+            n = lab.rehash()
+            hl_hot["lab"] = None
+            log(f"Manual rehash: {n} entries re-placed into {lab.cap} buckets. Collisions now {lab.collisions}.")
+        elif act == "tag":
+            name = next((t for t in FARM_TAGS if not lab.get(t)["found"]), None)
+            if name is None:
+                log("All farm tags are already registered.")
+            else:
+                info = lab.put(name, random.randint(1, 50))
+                hl_hot["lab"] = info["index"]
+                log(describe(info))
+        elif act == "pair":              # 'Aa' and 'BB' have the SAME full hash value
+            for k, v in (("Aa", 1), ("BB", 2)):
+                info = lab.put(k, v)
+                hl_hot["lab"] = info["index"]
+                log(describe(info))
+        elif act == "plant":             # find one plant by its 'row,col' key
+            info = plant_idx.get(document.getElementById("hl-plot").value.replace(" ", ""))
+            hl_hot["plant"] = info["index"]
+            log(describe(info))
+        elif act.startswith("stress"):   # stress5 / stress10 / stress20
+            log(stress(int(act[6:])))
+        elif act == "clear":
+            lab = HashTable(5, lab.mode)
+            hl_hot["lab"] = None
+            log("Registry cleared. Back to 5 buckets.")
+        refresh_panel()
+    except Exception as e:
+        js.showToast("Hash lab error: " + str(e))
+
+def on_mode(event):
+    global lab
+    lab = lab.convert(event.target.value)
+    hl_hot["lab"] = None
+    log("Switched to " + ("separate chaining" if lab.mode == "chain" else "linear probing (open addressing)") + ": same keys, new layout.")
+    refresh_panel()
+
+#=============== Part 3: Plant Registry (plot -> plant data, chaining) ===============
+SUN_NEED = {"Carrot": 4, "Wheat": 6, "Corn": 8}          # sunlight hours each crop wants
+SUN_TODAY = {"Sunny": 8, "Rain": 3, "Drought": 8, "Storm": 2}
+
+class PlantInfo:
+    def __init__(self, crop, age, water, sun, health):
+        self.crop, self.age, self.water, self.sun, self.health = crop, age, water, sun, health
+    def __str__(self):
+        return f"{self.crop} hp{self.health} {self.water}L sun {self.sun}/{SUN_NEED[self.crop]}h"
+
+def plant_info(p, weather):
+    sun = SUN_TODAY[weather]
+    health = (100 if p.watered else 50) - (20 if sun < SUN_NEED[p.crop] else 0)
+    return PlantInfo(p.crop, p.age, 3 if p.watered else 0, sun, health)
+
+def sync_plants(game):                   # mirror every planted plot into plant_idx
+    cols, w, live = game.farm.cols, game.climate.today(), {}
+    for i in range(len(game.farm.grid) * cols):
+        p = game.farm.plot(i)
+        if p.crop:
+            live[f"{i // cols},{i % cols}"] = plant_info(p, w)
+    for k in [k for k, _ in plant_idx.items() if k not in live]:
+        plant_idx.remove(k)              # harvested plots leave the registry
+    for k, v in live.items():
+        plant_idx.put(k, v)
+
+def stress(n):                           # fixed table vs rehashing table on an n x n grid
+    grow, fixed = HashTable(5), HashTable(5)
+    fixed.MAX_LOAD = 10 ** 9             # this one never rehashes
+    for r in range(n):
+        for c in range(n):
+            grow.put(f"{r},{c}", 1)
+            fixed.put(f"{r},{c}", 1)
+    def cost(t):
+        ps = [t.get(f"{r},{c}")["probes"] for r in range(n) for c in range(n)]
+        return round(sum(ps) / len(ps), 2), max(ps)
+    (fa, fw), (ga, gw) = cost(fixed), cost(grow)
+    return (f"{n}x{n} grid ({n * n} plots). Fixed 5 buckets: avg {fa} probes, worst {fw}. "
+            f"Rehashing: {grow.cap} buckets, avg {ga}, worst {gw}, {grow.rehashes} rehashes.")
+
+if DEMO:
+    t = HashTable(5)
+    for k in ("Egg", "Milk", "Wool", "Corn", "Wheat"):
+        info = t.put(k, 1)
+        print(f"put {k:5} hash {info['hash']:>10} -> slot {info['index']}", "COLLISION" if info["collision"] else "", "REHASH" if info["rehashed"] else "")
+    print("buckets:", t.cap, "| load:", round(t.size / t.cap, 2), "| collisions:", t.collisions, "| rehashes:", t.rehashes)
+    print("get Milk ->", t.get("Milk")["value"], "| 'Aa' and 'BB' same hash:", hash_key("Aa") == hash_key("BB"))
+    print(stress(10))
+    print("put O(1) avg, get O(1) avg, worst case O(n), rehash O(n) but amortized O(1)")
+
+if not DEMO and not hasattr(Game, "_hash_ready"):
+    FARM_TAGS = ["Hen", "Cow", "Sheep", "Barn", "Well", "Fence", "Tractor", "Silo", "Windmill", "Scarecrow"]
+    barn_idx, lab = HashTable(5), HashTable(5)
+    hl_hot = {"barn": None, "lab": None, "plant": None}
+    plant_idx = HashTable(5)             # chaining (the default mode)
+    hl_log = ["Try the 'Aa + BB' button: both have the same hash, so they collide!"]
+
+    panel = document.createElement("div")
+    panel.id = "hl-lab"
+    panel.className = "paper p-3 mt-4 text-sm"
+    panel.innerHTML = """
+      <div class="font-bold text-lg">Hash Table Lab (Topic 6)</div>
+      <p class="text-xs opacity-80 mb-2">slot = hash(key) % buckets. When two keys land in the same slot it is a collision. When the load passes 75% the table grows to a prime size and rehashes every key.</p>
+      <div class="font-bold">Plant Registry (live, chaining)</div>
+      <p class="text-xs opacity-80 mb-1">Key = 'row,col' of the plot. Value = crop, health, water and sunlight. Plant something on the farm and it appears here.</p>
+      <div class="flex flex-wrap items-center gap-1 mb-1">
+        <input id="hl-plot" placeholder="row,col" class="paper px-2 py-1 text-sm w-24">
+        <button class="btn blue text-xs" data-act="plant">Find plant</button>
+        <button class="btn text-xs" data-act="stress5">Grow 5x5</button>
+        <button class="btn text-xs" data-act="stress10">Grow 10x10</button>
+        <button class="btn text-xs" data-act="stress20">Grow 20x20</button>
+      </div>
+      <div id="hl-plant-stats"></div><div id="hl-plant" class="mb-3 max-h-48 overflow-auto"></div>
+      <div class="font-bold">Barn Index (live)</div>
+      <p class="text-xs opacity-80 mb-1">Every barn item is stored here by name. Sell uses a hash lookup instead of scanning.</p>
+      <div id="hl-barn-stats"></div><div id="hl-barn" class="mb-3"></div>
+      <div class="font-bold">Farm Tag Registry (sandbox)</div>
+      <div class="flex flex-wrap items-center gap-1 my-1">
+        <input id="hl-key" placeholder="key" class="paper px-2 py-1 text-sm w-24">
+        <input id="hl-val" placeholder="value" class="paper px-2 py-1 text-sm w-20">
+        <button class="btn green text-xs" data-act="put">Put</button>
+        <button class="btn blue text-xs" data-act="get">Get</button>
+        <button class="btn text-xs" data-act="del">Remove</button>
+      </div>
+      <div class="flex flex-wrap items-center gap-1 mb-2">
+        <select id="hl-mode" class="paper px-2 py-1 text-xs"><option value="chain">Separate chaining</option><option value="probe">Linear probing (open addressing)</option></select>
+        <button class="btn text-xs" data-act="tag">Add farm tag</button>
+        <button class="btn text-xs" data-act="pair">Aa + BB (collide)</button>
+        <button class="btn blue text-xs" data-act="grow">Rehash now</button>
+        <button class="btn text-xs" data-act="clear">Clear</button>
+      </div>
+      <div id="hl-stats"></div><div id="hl-table" class="mb-2"></div>
+      <div id="hl-log" class="text-xs code-font"></div>"""
+    document.getElementById("view-game").appendChild(panel)
+    panel.addEventListener("click", create_proxy(on_click))
+    document.getElementById("hl-mode").addEventListener("change", create_proxy(on_mode))
+    refresh_panel()
+
+    _old_view = Game.view
+    def view_with_hash(self):            # the game's view() now also feeds both live indexes
+        data = _old_view(self)
+        sync_barn(self.barn)
+        sync_plants(self)
+        refresh_panel()
+        return data
+    Game.view = view_with_hash
+    Game._hash_ready = True
 ` },
 7: { title: "Graph Foundations, Adjacency Matrices/Lists, & DFS/BFS", code: `# Topic 7: Graph Foundations, Adjacency Matrices/Lists, & DFS/BFS
 # ==== WRITE YOUR CODE HERE ====
